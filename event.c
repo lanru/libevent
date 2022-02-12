@@ -218,7 +218,7 @@ int event_debug_mode_on_ = 0;
  *        to be shared across threads (if thread support is enabled).
  *
  *        When and if evthreads are initialized, this variable will be evaluated,
- *        and if set to something other than zero, this means the evthread setup 
+ *        and if set to something other than zero, this means the evthread setup
  *        functions were called out of order.
  *
  *        See: "Locks and threading" in the documentation.
@@ -2633,7 +2633,8 @@ event_remove_timer(struct event *ev)
 /* Implementation function to add an event.  Works just like event_add,
  * except: 1) it requires that we have the lock.  2) if tv_is_absolute is set,
  * we treat tv as an absolute time, not as an interval to add to the current
- * time */
+ * time
+ * 往注册事件队列中添加事件处理器 */
 int
 event_add_nolock_(struct event *ev, const struct timeval *tv,
     int tv_is_absolute)
@@ -2665,6 +2666,8 @@ event_add_nolock_(struct event *ev, const struct timeval *tv,
 	/*
 	 * prepare for timeout insertion further below, if we get a
 	 * failure on any step, we should not change any state.
+	 * 如果新添加的事件处理器是定时器,目它尚未被添加到通用定时器队列或时间堆中,则为该
+	 * 定时器在时间堆上预留一个位置
 	 */
 	if (tv != NULL && !(ev->ev_flags & EVLIST_TIMEOUT)) {
 		if (min_heap_reserve_(&base->timeheap,
@@ -2675,7 +2678,12 @@ event_add_nolock_(struct event *ev, const struct timeval *tv,
 	/* If the main thread is currently executing a signal event's
 	 * callback, and we are not the main thread, then we want to wait
 	 * until the callback is done before we mess with the event, or else
-	 * we can race on ev_ncalls and ev_pncalls below. */
+	 * we can race on ev_ncalls and ev_pncalls below.
+	 * 如果当前调用者不是主线程(执行事件循环的线程),并且被添加的事件处理器是信号事件
+	 * 处理嚣,而且主线程正在执行该信号事件处理嚣的回调函数,则当前调用者必须等待主线程
+	 * 完成调用,否则将引起竞态条件参考(考虑event结构体的ev_ncalls和ev_pncalls成
+	 * 员)
+	 */
 #ifndef EVENT__DISABLE_THREAD_SUPPORT
 	if (base->current_event == event_to_event_callback(ev) &&
 	    (ev->ev_events & EV_SIGNAL)
@@ -2688,13 +2696,17 @@ event_add_nolock_(struct event *ev, const struct timeval *tv,
 	if ((ev->ev_events & (EV_READ|EV_WRITE|EV_CLOSED|EV_SIGNAL)) &&
 	    !(ev->ev_flags & (EVLIST_INSERTED|EVLIST_ACTIVE|EVLIST_ACTIVE_LATER))) {
 		if (ev->ev_events & (EV_READ|EV_WRITE|EV_CLOSED))
+			//添加io事件和io事件处理的映射关系
 			res = evmap_io_add_(base, ev->ev_fd, ev);
 		else if (ev->ev_events & EV_SIGNAL)
+			//添加信号事件和信号事件处理器的映射关系
 			res = evmap_signal_add_(base, (int)ev->ev_fd, ev);
 		if (res != -1)
+			//将事件处理器插入到注册事件队列
 			event_queue_insert_inserted(base, ev);
 		if (res == 1) {
-			/* evmap says we need to notify the main thread. */
+			/* evmap says we need to notify the main thread.
+			 * 事件多路分发器中添加了新的事件,所以要通知主线程*/
 			notify = 1;
 			res = 0;
 		}
@@ -2703,6 +2715,9 @@ event_add_nolock_(struct event *ev, const struct timeval *tv,
 	/*
 	 * we should change the timeout state only if the previous event
 	 * addition succeeded.
+	 * 下面将事件处理器添加至通用定时器队列成时间堆中。对于信号事件处理器和I/O事体处
+	 * 理器,根据evmap_*_add函数的结果决定是否添加(这是为了给事件设置超时):而对于定
+	 * 时器,则始终应该添加之
 	 */
 	if (res != -1 && tv != NULL) {
 		struct timeval now;
@@ -2717,11 +2732,16 @@ event_add_nolock_(struct event *ev, const struct timeval *tv,
 		 * timeout value and re-add the event.
 		 *
 		 * If tv_is_absolute, this was already set.
+		 * 对于永次性事件处理器,如果其超时时间不是绝对时间,则将该事件处理器的越时时
+		 * 间记录在变量ev->ev_io_timeout中。ev_io_timeout是定义在event
+		 * -internal.h文件中的宏:#define ev_io_timeout _ev.ev_io
+		 * .ev_timeout
 		 */
 		if (ev->ev_closure == EV_CLOSURE_EVENT_PERSIST && !tv_is_absolute)
 			ev->ev_io_timeout = *tv;
 
 #ifndef USE_REINSERT_TIMEOUT
+		// 如果该事件处理器巳经被插入通用定时器队列或时间堆中,则先剔除它
 		if (ev->ev_flags & EVLIST_TIMEOUT) {
 			event_queue_remove_timeout(base, ev);
 		}
@@ -2729,7 +2749,13 @@ event_add_nolock_(struct event *ev, const struct timeval *tv,
 
 		/* Check if it is active due to a timeout.  Rescheduling
 		 * this timeout before the callback can be executed
-		 * removes it from the active list. */
+		 * removes it from the active list.
+		 * 如果待添加的事件处理器巳经被激活,且原因是超时,则从活动事件队列中删除它,以
+		 * 避免其回调函数被执行。对于信号事件处理嚣,必要时还需将其ncalls成员设置为
+		 * 0(注意,ev_pncalls如果不为NULL,它指向ncalls)、前面提到,信号事件被触
+		 * 发时,ncalls指向其回调函数被执行的次数,将ncalls设设置为0,可以干净地终止
+		 * 信号事件的处理
+		 * */
 		if ((ev->ev_flags & EVLIST_ACTIVE) &&
 		    (ev->ev_res & EV_TIMEOUT)) {
 			if (ev->ev_events & EV_SIGNAL) {
@@ -2755,13 +2781,14 @@ event_add_nolock_(struct event *ev, const struct timeval *tv,
 
 		if (tv_is_absolute) {
 			ev->ev_timeout = *tv;
-		} else if (common_timeout) {
+		}//判断应该将定时器插入通用定时器队列，还是插入时间堆
+		else if (common_timeout) {
 			struct timeval tmp = *tv;
 			tmp.tv_usec &= MICROSECONDS_MASK;
 			evutil_timeradd(&now, &tmp, &ev->ev_timeout);
 			ev->ev_timeout.tv_usec |=
 			    (tv->tv_usec & ~MICROSECONDS_MASK);
-		} else {
+		} else {//加上当前系统时间,以取得定时器超时的绝对时间
 			evutil_timeradd(&now, tv, &ev->ev_timeout);
 		}
 
@@ -2774,7 +2801,10 @@ event_add_nolock_(struct event *ev, const struct timeval *tv,
 #else
 		event_queue_insert_timeout(base, ev);
 #endif
-
+		/* 如果被插入的事件处理器是通用定时器队列中的第一个元素,则通过调用
+		 * common_timeout_schedule函数将其转移到时间堆中。这样,通用定时器链表时
+		 * 间堆中的定时器就得到了统一的处理
+		 */
 		if (common_timeout) {
 			struct common_timeout_list *ctl =
 			    get_common_timeout_list(base, &ev->ev_timeout);
@@ -2797,7 +2827,8 @@ event_add_nolock_(struct event *ev, const struct timeval *tv,
 		}
 	}
 
-	/* if we are not in the right thread, we need to wake up the loop */
+	/* if we are not in the right thread, we need to wake up the loop
+	 * 如果必要,唤醒主线程*/
 	if (res != -1 && notify && EVBASE_NEED_NOTIFY(base))
 		evthread_notify_base(base);
 
@@ -3403,15 +3434,16 @@ event_queue_insert_inserted(struct event_base *base, struct event *ev)
 {
 	EVENT_BASE_ASSERT_LOCKED(base);
 
+	//避免重复插入
 	if (EVUTIL_FAILURE_CHECK(ev->ev_flags & EVLIST_INSERTED)) {
 		event_errx(1, "%s: %p(fd "EV_SOCK_FMT") already inserted", __func__,
 		    ev, EV_SOCK_ARG(ev->ev_fd));
 		return;
 	}
 
-	INCR_EVENT_COUNT(base, ev->ev_flags);
+	INCR_EVENT_COUNT(base, ev->ev_flags);//将base拥有的事件处理器总数加1
 
-	ev->ev_flags |= EVLIST_INSERTED;
+	ev->ev_flags |= EVLIST_INSERTED;//标记事件已被添加过
 }
 
 static void

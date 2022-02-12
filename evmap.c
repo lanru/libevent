@@ -272,8 +272,11 @@ evmap_io_init(struct evmap_io *entry)
 int
 evmap_io_add_(struct event_base *base, evutil_socket_t fd, struct event *ev)
 {
+	/* 获得event_base的后端I/O复用机制实例 */
 	const struct eventop *evsel = base->evsel;
+	/* 获得event_base的文件描述符与I/O事件队列的映射表(哈希表或数组) */
 	struct event_io_map *io = &base->io;
+	// fd参数对应的I/O事件列表
 	struct evmap_io *ctx = NULL;
 	int nread, nwrite, nclose, retval = 0;
 	short res = 0, old = 0;
@@ -285,11 +288,13 @@ evmap_io_add_(struct event_base *base, evutil_socket_t fd, struct event *ev)
 		return 0;
 
 #ifndef EVMAP_USE_HT
+	//I/O事件队列数组io.entries中,每个文件描述符占用一项。如果fd大于当前数组的大小,则增加数组的大小(扩大后的数组的容量要大于fd)
 	if (fd >= io->nentries) {
 		if (evmap_make_space(io, fd, sizeof(struct evmap_io *)) == -1)
 			return (-1);
 	}
 #endif
+	/*下面这个宏根据EYMRP_USE_HT是否被定义一有不同的实瑕,但目的都是创建ctx,在映射表io中为fd和ctx添加映射关系*/
 	GET_IO_SLOT_AND_CTOR(ctx, io, fd, evmap_io, evmap_io_init,
 						 evsel->fdinfo_len);
 
@@ -333,7 +338,10 @@ evmap_io_add_(struct event_base *base, evutil_socket_t fd, struct event *ev)
 		void *extra = ((char*)ctx) + sizeof(struct evmap_io);
 		/* XXX(niels): we cannot mix edge-triggered and
 		 * level-triggered, we should probably assert on
-		 * this. */
+		 * this.
+		 * 往事件多路分发器中注册事件。add是事件多路分发器的接口函数之一。对不
+		 * 同的后端I/O复用机制,这些接口函数有不同的实现。我们将在后面讨论事件多路分发
+		 * 器的接口函数*/
 		if (evsel->add(base, ev->ev_fd,
 			old, (ev->ev_events & EV_ET) | res, extra) == -1)
 			return (-1);

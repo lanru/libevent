@@ -130,7 +130,7 @@ struct event {
 	} ev_timeout_pos;
 	evutil_socket_t ev_fd;
 
-	short ev_events;
+	short ev_events;  //事件类型,
 	short ev_res;		/* result passed to event callback */
 
 	struct event_base *ev_base;
