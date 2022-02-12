@@ -1998,11 +1998,13 @@ event_base_loop(struct event_base *base, int flags)
 			/*
 			 * if we have active events, we just poll new events
 			 * without waiting.
+			 * 如果有就绪事件尚未处理,则将IO复用系统调用的超时时间“置0“。这样I/O复用系统调用直接返回,程序也就可以立即处理就绪事件了
 			 */
 			evutil_timerclear(&tv);
 		}
 
-		/* If we have no events, we just exit */
+		/* If we have no events, we just exit
+		 * event_base没有注册任何事件，直接退出*/
 		if (0==(flags&EVLOOP_NO_EXIT_ON_EMPTY) &&
 		    !event_haveevents(base) && !N_ACTIVE_CALLBACKS(base)) {
 			event_debug(("%s: no events registered.", __func__));
@@ -2019,9 +2021,9 @@ event_base_loop(struct event_base *base, int flags)
 			(*watcher->callback.prepare)(watcher, &prepare_info, watcher->arg);
 			EVBASE_ACQUIRE_LOCK(base, th_base_lock);
 		}
-
+		//清空时间缓存
 		clear_time_cache(base);
-
+		//调用事件多路分发器的dispatch方法等待事件，将就绪事件插入活动事件队列
 		res = evsel->dispatch(base, tv_p);
 
 		if (res == -1) {
@@ -2041,9 +2043,11 @@ event_base_loop(struct event_base *base, int flags)
 			EVBASE_ACQUIRE_LOCK(base, th_base_lock);
 		}
 
+		//检查时间堆的到期事件并依次执行之
 		timeout_process(base);
 
 		if (N_ACTIVE_CALLBACKS(base)) {
+			//调用event_process_active函数依次处理就绪的信号事件和I/O事件
 			int n = event_process_active(base);
 			if ((flags & EVLOOP_ONCE)
 			    && N_ACTIVE_CALLBACKS(base) == 0
@@ -2054,7 +2058,7 @@ event_base_loop(struct event_base *base, int flags)
 	}
 	event_debug(("%s: asked to terminate loop.", __func__));
 
-done:
+done:// 事件循环结束,清空时间缓存，并设置停止循环标志
 	clear_time_cache(base);
 	base->running_loop = 0;
 
