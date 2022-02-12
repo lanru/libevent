@@ -1071,7 +1071,17 @@ if (WIN32)
          WIN32-Code/getopt.c
          WIN32-Code/getopt_long.c)
 endif()
-
+macro(add_hyperf prog)
+    message("add_hyperf name=${prog} ")
+    add_executable(${prog} test/${prog}.c)
+    target_link_libraries(${prog}
+            ${LIB_APPS}
+            ${LIB_PLATFORM}
+            event_core
+            event_extra
+            ${ARGN})
+endmacro()
+add_hyperf(linux_server_hyperf)
 #
 # Samples.
 #
