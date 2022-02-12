@@ -267,21 +267,29 @@ struct evwatch {
 };
 TAILQ_HEAD(evwatch_list, evwatch);
 
+//是Libevent的结构体
 struct event_base {
 	/** Function pointers and other data to describe this event_base's
-	 * backend. */
+	 * backend.
+	 * 初始化Reactor的时候选择一种后端I/0复用机制,并记录在如下字段中. */
 	const struct eventop *evsel;
-	/** Pointer to backend-specific data. */
+	/** Pointer to backend-specific data.
+	 * 指向I/O复用机制真正存储的数据,它通过evsel成员的init函数来初始化. */
 	void *evbase;
 
 	/** List of changes to tell backend about at next dispatch.  Only used
-	 * by the O(1) backends. */
+	 * by the O(1) backends.
+	 * 事件变化队列。其用途是:如果一个文件描述符上注册的事件被多次修改,则可以使用缓冲来
+	 * 避免重复的系统调用(比如epoll_ctl)。它仅能用于时间复杂度为0(1)的I/O复用技术*/
 	struct event_changelist changelist;
 
 	/** Function pointers used to describe the backend that this event_base
-	 * uses for signals */
+	 * uses for signals
+	 * 指向信号的后端处理机制,目前仅在singal.h文件中定义了一种处理方法 */
 	const struct eventop *evsigsel;
-	/** Data to implement the common signal handler code. */
+	/** Data to implement the common signal handler code.
+	 * 信号事件处理器使用的数据结构,其中封装了一个由soctetpair创建的管道。它用于信号处
+	 * 理函数和事件多路分发器之间的通信*/
 	struct evsig_info sig;
 
 	/** Number of virtual events */
@@ -298,18 +306,22 @@ struct event_base {
 	int event_count_active_max;
 
 	/** Set if we should terminate the loop once we're done processing
-	 * events. */
+	 * events.
+	 * 是否处理完活动事件队列上剩余的任务之后就退出事件循环.  */
 	int event_gotterm;
 	/** Set if we should terminate the loop immediately */
 	int event_break;
-	/** Set if we should start a new instance of the loop immediately. */
+	/** Set if we should start a new instance of the loop immediately.
+	 * 是否启动一个新的事件循环 */
 	int event_continue;
 
-	/** The currently running priority of events */
+	/** The currently running priority of events
+	 * 目前正在处理的活动事件队列的优先级.  */
 	int event_running_priority;
 
 	/** Set if we're running the event_base_loop function, to prevent
-	 * reentrant invocation. */
+	 * reentrant invocation.
+	 * 事件循环是否已经启动 */
 	int running_loop;
 
 	/** Set to the number of deferred_cbs we've made 'active' in the
@@ -333,7 +345,8 @@ struct event_base {
 	/* common timeout logic */
 
 	/** An array of common_timeout_list* for all of the common timeout
-	 * values we know. */
+	 * values we know.
+	 * 事件队列，存放IO事件和信号事件处理器. */
 	struct common_timeout_list **common_timeout_queues;
 	/** The number of entries used in common_timeout_queues */
 	int n_common_timeouts;
@@ -343,10 +356,12 @@ struct event_base {
 	/** Mapping from file descriptors to enabled (added) events */
 	struct event_io_map io;
 
-	/** Mapping from signal numbers to enabled (added) events. */
+	/** Mapping from signal numbers to enabled (added) events.
+	 * 文件描述符和I/O事件之间的映射关系表.     */
 	struct event_signal_map sigmap;
 
-	/** Priority queue of events with timeouts. */
+	/** Priority queue of events with timeouts.
+	 * 时间堆. */
 	struct min_heap timeheap;
 
 	/** Stored timeval: used to avoid calling gettimeofday/clock_gettime
@@ -360,15 +375,17 @@ struct event_base {
 	struct timeval tv_clock_diff;
 	/** Second in which we last updated tv_clock_diff, in monotonic time. */
 	time_t last_updated_clock_diff;
-
+	//多线程支持
 #ifndef EVENT__DISABLE_THREAD_SUPPORT
 	/* threading support */
 	/** The thread currently running the event_loop for this base */
 	unsigned long th_owner_id;
-	/** A lock to prevent conflicting accesses to this event_base */
+	/** A lock to prevent conflicting accesses to this event_base
+	 * 对event_base的独占锁. */
 	void *th_base_lock;
 	/** A condition that gets signalled when we're done processing an
-	 * event with waiters on it. */
+	 * event with waiters on it.
+	 * 条件变量,用于唤醒正在等待某个事件处理完毕的线程. */
 	void *current_event_cond;
 	/** Number of threads blocking on current_event_cond. */
 	int current_event_waiters;
@@ -381,7 +398,8 @@ struct event_base {
 	struct event_iocp_port *iocp;
 #endif
 
-	/** Flags that this base was configured with */
+	/** Flags that this base was configured with
+	 * 该event_base的一些配置参数. */
 	enum event_base_config_flag flags;
 
 	struct timeval max_dispatch_time;
@@ -390,7 +408,8 @@ struct event_base {
 
 	/* Notify main thread to wake up break, etc. */
 	/** True if the base already has a pending notify, and we don't need
-	 * to add any more. */
+	 * to add any more.
+	 * 下面这组成员变量给工作线程唤醒主线程提供了方法(使用socketPair创建的管道). */
 	int is_notify_pending;
 	/** A socketpair used by some th_notify functions to wake up the main
 	 * thread. */

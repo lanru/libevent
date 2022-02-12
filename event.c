@@ -1955,7 +1955,7 @@ event_base_loop(struct event_base *base, int flags)
 	/* Grab the lock.  We will release it inside evsel.dispatch, and again
 	 * as we invoke watchers and user callbacks. */
 	EVBASE_ACQUIRE_LOCK(base, th_base_lock);
-
+	//一个event_base仅允许运行一个事件循环
 	if (base->running_loop) {
 		event_warnx("%s: reentrant invocation.  Only one event_base_loop"
 		    " can run on each event_base at once.", __func__);
@@ -1963,10 +1963,10 @@ event_base_loop(struct event_base *base, int flags)
 		return -1;
 	}
 
-	base->running_loop = 1;
+	base->running_loop = 1;/*标记该event_base已经开始远行*/
 
-	clear_time_cache(base);
-
+	clear_time_cache(base);//清除event_base的系统事件缓存
+	//设置信号事件的event_base实例
 	if (base->sig.ev_signal_added && base->sig.ev_n_signals_added)
 		evsig_set_base_(base);
 
@@ -1993,7 +1993,7 @@ event_base_loop(struct event_base *base, int flags)
 
 		tv_p = &tv;
 		if (!N_ACTIVE_CALLBACKS(base) && !(flags & EVLOOP_NONBLOCK)) {
-			timeout_next(base, &tv_p);
+			timeout_next(base, &tv_p);//获取时间堆上堆顶元素的超时值,即I/O复用系统调用本次应该设置的超时值
 		} else {
 			/*
 			 * if we have active events, we just poll new events
